@@ -1,18 +1,17 @@
-// server.js (CÓDIGO ACTUALIZADO)
+// server.js (VERSION CON MODELO SENSOR, ALERTAS Y RUTAS DE GESTIÓN)
 
 const express = require('express');
 const mongoose = require('mongoose');
 const bodyParser = require('body-parser');
 const cors = require('cors');
-const Measurement = require('./models/Measurement'); // Importa el modelo
+
+const Measurement = require('./models/Measurement'); 
+const Sensor = require('./models/Sensor');           // ⭐️ NUEVO: Importa el modelo Sensor
 
 const app = express();
 const PORT = 3000;
 
-// --- 1. CONFIGURACIÓN DE MONGO DB ---
-// REEMPLAZA ESTA CADENA con tu URL de MongoDB (local o Atlas)
-// Ejemplo de URL local: 'mongodb://localhost:27017/trazabilidadDB'
-// Si usas Atlas, será una URL https://...
+// --- CONFIGURACIÓN DE MONGO DB ---
 const dbURI = 'mongodb://localhost:27017/trazabilidadDB';
 mongoose.connect(dbURI)
     .then(() => console.log('✅ Conectado a MongoDB'))
@@ -21,84 +20,125 @@ mongoose.connect(dbURI)
 
 app.use(bodyParser.json());
 app.use(bodyParser.urlencoded({ extended: true }));
-// Permitir CORS solo desde el frontend en desarrollo
 app.use(cors({ origin: '*' }));
 
 
 // =========================================================
-// RUTA 1: Endpoint de Recepción del ESP32 (ALMACENAMIENTO)
+// RUTA 1: Endpoint de Recepción del ESP32 (ALMACENAMIENTO y ALERTAS)
+// Se recomienda usar POST para el envío de datos de dispositivos
 // =========================================================
-app.get('/api/data', async (req, res) => {
-    // Los datos vienen como strings desde el ESP32 (query parameters)
-    const { sensorId, temp, voltage } = req.query;
+app.post('/api/data', async (req, res) => {
+    // Si el ESP32 usa GET (query parameters), usa req.query. Si usa POST/JSON, usa req.body.
+    const { sensorId, tempC, voltageV } = req.body || req.query; // Soporte para GET y POST
 
-    console.log(`=== NUEVO DATO RECIBIDO DEL ESP32 ===`);
-    console.log(`ID del Sensor: ${sensorId}, Temp: ${temp}, Volt: ${voltage}`);
-    console.log(`=====================================`);
-    
-    // Validar y convertir los datos
-    if (!sensorId || isNaN(parseFloat(temp)) || isNaN(parseFloat(voltage))) {
+    if (!sensorId || isNaN(parseFloat(tempC)) || isNaN(parseFloat(voltageV))) {
         return res.status(400).send('Faltan parámetros o son inválidos.');
     }
 
     try {
-        // Crear un nuevo documento de medición
-        const newMeasurement = new Measurement({
-            sensorId: sensorId,
-            temperatureC: parseFloat(temp),
-            voltageV: parseFloat(voltage)
+        const temp = parseFloat(tempC);
+        const voltage = parseFloat(voltageV);
+        
+        // 1. BUSCAR/CREAR CONFIGURACIÓN DEL SENSOR (AUTOCONFIGURACIÓN)
+        let sensorConfig = await Sensor.findOneAndUpdate(
+            { hardwareId: sensorId },
+            { $setOnInsert: { 
+                friendlyName: sensorId, 
+                alertThreshold: 5.0, 
+                voltageThreshold: 4.2 
+            }},
+            { new: true, upsert: true, setDefaultsOnInsert: true }
+        );
+        
+        const { alertThreshold, voltageThreshold, friendlyName } = sensorConfig;
+        
+        // 2. LOGUEAR LA MEDICIÓN EN LA BD
+        const newMeasurement = new Measurement({ sensorId, temperatureC: temp, voltageV: voltage });
+        await newMeasurement.save();
+
+        // 3. CHECKEO DE ALERTA (Aquí iría la lógica de notificación push)
+        if (temp > alertThreshold) {
+            console.warn(`🚨 ALERTA DE TEMP: ${friendlyName} (${sensorId}) superó el umbral (${alertThreshold}°C).`);
+        }
+        if (voltage < voltageThreshold) {
+            console.warn(`⚠️ ALERTA DE BATERÍA: ${friendlyName} (${sensorId}) tiene batería baja (${voltage.toFixed(2)}V).`);
+        }
+        
+        console.log(`[DB] Medición guardada de: ${friendlyName}. Temp: ${temp.toFixed(2)}°C`);
+        res.status(200).send('Datos recibidos y guardados OK.');
+
+    } catch (error) {
+        console.error('Error procesando los datos:', error);
+        res.status(500).send('Error interno del servidor.');
+    }
+});
+
+
+// =========================================================
+// RUTA 2: Endpoint de Gestión de Configuración (Desde Flutter)
+// =========================================================
+app.post('/api/sensors/config', async (req, res) => {
+    const { hardwareId, friendlyName, alertThreshold, voltageThreshold } = req.body;
+
+    if (!hardwareId) {
+        return res.status(400).json({ message: 'El hardwareId es requerido.' });
+    }
+
+    try {
+        const sensor = await Sensor.findOneAndUpdate(
+            { hardwareId: hardwareId },
+            { 
+                friendlyName, 
+                alertThreshold,
+                voltageThreshold
+            },
+            { new: true, upsert: true, runValidators: true }
+        );
+
+        res.status(200).json({ 
+            message: 'Configuración de sensor actualizada con éxito.', 
+            sensor: sensor 
         });
 
-        // Guardar en la base de datos
-        await newMeasurement.save();
-        console.log(`[DB] Medición guardada con éxito: ${newMeasurement.id}`);
-
-        res.status(200).send('Datos recibidos y almacenados.');
-
     } catch (error) {
-        console.error('Error al guardar la medición:', error);
-        res.status(500).send('Error interno del servidor al almacenar datos.');
+        console.error("Error al configurar el sensor:", error);
+        res.status(500).json({ message: 'Error interno del servidor.' });
     }
 });
 
 // =========================================================
-// RUTA 2: Endpoint para la Aplicación Web/Flutter (RECUPERACIÓN)
+// RUTA 3: Endpoint de Datos Recientes (Devuelve Nombre Amigable)
 // =========================================================
-app.get('/api/temperaturas', async (req, res) => {
-    try {
-        // Enviar las 50 mediciones más recientes, ordenadas por timestamp descendente
-        const measurements = await Measurement.find()
-            .sort({ timestamp: -1 })
-            .limit(50);
-        
-        // La respuesta JSON que consumirá Flutter/Web
-        res.json(measurements);
-    } catch (error) {
-        console.error('Error al obtener datos:', error);
-        res.status(500).send('Error al recuperar mediciones.');
-    }
-});
-
 app.get('/api/latest', async (req, res) => {
     try {
         // Agregación para obtener la última medición única por cada sensor
         const latestMeasurements = await Measurement.aggregate([
-            { $sort: { timestamp: -1 } }, // Ordenar por más reciente
+            { $sort: { timestamp: -1 } },
             {
                 $group: {
-                    _id: "$sensorId", // Agrupar por ID del sensor
+                    _id: "$sensorId",
                     temperatureC: { $first: "$temperatureC" },
                     voltageV: { $first: "$voltageV" },
                     timestamp: { $first: "$timestamp" }
                 }
             },
-            { // Proyectar los campos finales
+            { 
+                $lookup: {
+                    from: 'sensors', // Nombre de la colección de sensores en MongoDB
+                    localField: '_id',
+                    foreignField: 'hardwareId',
+                    as: 'sensorInfo'
+                }
+            },
+            { $unwind: { path: '$sensorInfo', preserveNullAndEmptyArrays: true } },
+            { 
                 $project: {
-                    _id: 0, 
                     sensorId: "$_id",
                     temperatureC: 1,
                     voltageV: 1,
-                    timestamp: 1
+                    timestamp: 1,
+                    friendlyName: { $ifNull: ["$sensorInfo.friendlyName", "$_id"] },
+                    alertThreshold: { $ifNull: ["$sensorInfo.alertThreshold", 5.0] },
                 }
             }
         ]);
@@ -112,11 +152,10 @@ app.get('/api/latest', async (req, res) => {
 
 
 // =========================================================
-// RUTA 2: Endpoint para la Aplicación Web/Flutter (DATOS HISTÓRICOS)
+// RUTA 4: Endpoint de Datos Históricos (Mantiene /api/history)
 // =========================================================
-// Acepta un parámetro 'sensorId' para filtrar la historia
 app.get('/api/history', async (req, res) => {
-    // Si no se especifica sensorId, devolvemos un error o una lista vacía
+    // ... (El código de /api/history se mantiene igual)
     const { sensorId, limit = 200 } = req.query; 
 
     if (!sensorId) {
