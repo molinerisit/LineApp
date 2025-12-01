@@ -1,71 +1,116 @@
-﻿🌡️ Proyecto de Trazabilidad IoT de Heladeras (Deep Sleep Architecture)
-Este repositorio contiene el código completo y la documentación técnica de un sistema de monitoreo de temperatura y voltaje diseñado para entornos de refrigeración, optimizado para la eficiencia energética mediante el modo Deep Sleep del ESP32.
-1. ⚙️ Arquitectura General y Tecnologías
-El sistema utiliza una arquitectura de servicios desacoplados (API RESTful) para manejar la comunicación de datos y la configuración.
-Componente
-	Tecnología
-	Rol Principal
-	Microcontrolador
-	ESP32 WROOM-32E
-	Medición, filtrado de datos y Deep Sleep (300s).
-	Backend
-	Node.js (Express)
-	API RESTful, gestión de umbrales y alertas.
-	Base de Datos
-	MongoDB
-	Almacenamiento de mediciones (Measurement) y configuraciones (Sensor).
-	Frontend
-	Flutter (Dart)
-	Visualización de datos en tiempo real, gráficos (fl_chart) y gestión de configuración.
-	2. 🔌 Componentes de Hardware y Calibración
-2.1. Eficiencia Energética y Deep Sleep
-El firmware está diseñado para maximizar la vida útil de la batería:
-* Ciclo de Trabajo: El ESP32 se despierta, mide, envía datos y vuelve a dormir por 300 segundos (5 minutos).
-* Activación: Mediante el temporizador interno del ESP32 (esp_sleep_enable_timer_wakeup).
-2.2. Monitoreo de Batería (Voltaje)
-El sistema monitorea 4 pilas AA ($\sim 6\text{V}$) utilizando un divisor de voltaje para reducir la entrada al ADC del ESP32 (máx. $\sim 3.3\text{V}$).
-Parámetro
-	Valor Calibrado
-	Componente
-	Voltaje Reportado
-	$\sim 6.0\text{V}$ (Máx.)
-	[Firmware: *.ino]
-	Factor Divisor
-	$\mathbf{1.82}$
-	[Firmware: *.ino]
-	Pin de Medición
-	GPIO 34 (ADC)
-	$R_1=100\text{k}\Omega / R_2=47\text{k}\Omega$
-	Nota: El factor $\mathbf{1.82}$ es un valor calibrado para corregir la lectura inicial de $10.32\text{V}$ a la tensión nominal correcta de $6.0\text{V}$.
-2.3. Sensores de Temperatura
-* Sensor: DS18B20 Sumergible (Múltiples unidades).
-* Conexión: Bus One-Wire (GPIO 4 / ONE_WIRE_BUS).
-3. 🤖 Lógica del Firmware (ESP32)
-* Mapeo de Sensores: Se asigna una ID Lógica Fija (HELADERA-01, etc.) a cada dirección física del sensor DS18B20.
-* Lectura de Voltaje: La función readBatteryVoltage() usa un promedio de 20 muestras para estabilizar la lectura antes de aplicar el factor de corrección.
-* Envío de Datos: Se realiza un POST con un payload JSON a la API del servidor.
-4. 🖥️ Lógica del Backend (Node.js/Express)
-4.1. Escalabilidad y Endpoints
-El servidor está configurado para permitir la escalabilidad y la fácil adición de nuevos sensores:
-Endpoint
-	Uso
-	Lógica de Recuperación
-	POST /api/sensors/config
-	Configuración de Umbrales y Nombre Amigable.
-	Crea/actualiza la configuración en la colección sensors.
-	GET /api/sensors/ids
-	Obtiene la lista de IDs disponibles para configuración.
-	Devuelve la lista fija de IDs del firmware (HELADERA-01 a HELADERA-05), permitiendo al usuario configurar nuevos sensores sin modificar el código.
-	GET /api/latest (MODIFICADO)
-	Pantalla principal.
-	Prioriza la consulta en la tabla sensors. Lista todos los sensores configurados, mostrando "Sin datos" si el ESP32 aún no ha enviado su primera medición (UX mejorada).
-	4.2. Corrección de Horario (UTC a Local)
-* Problema: MongoDB guarda las marcas de tiempo en UTC, lo que causaba un desfase de 3 horas al ser interpretado en Flutter.
-* Solución Aplicada: La conversión a la hora local se fuerza en el modelo Measurement.fromJson (Dart) utilizando la lógica DateTime.toUtc().toLocal().
-5. 📱 Lógica del Frontend (Flutter)
-5.1. Estabilidad y Visualización
-* Manejo de Nulls: Los campos de medición (temperatureC, voltageV, timestamp) se definieron como opcionales (?) en el modelo SensorState para manejar de forma segura los valores null devueltos por /api/latest cuando un sensor aún no ha reportado datos.
-* Refresco Automático (UX): La pantalla principal (MeasurementScreen) utiliza un Timer para consultar la API cada 30 segundos, eliminando la necesidad de recargas manuales.
-* Recarga Forzada: El botón "Reintentar conexión" ahora utiliza Navigator.pushReplacement para forzar un reinicio completo de la pantalla y el Timer en caso de errores de conexión, asegurando la máxima estabilidad.
-5.2. Vista de Historial
-* Gráfico (HistoryScreen): Muestra los últimos 100 puntos de medición de temperatura utilizando fl_chart. El layout fue mejorado con altura fija ($\mathbf{250\text{px}}$) y espaciado corregido en el eje X para el indicador "Tiempo".
+PROYECTO DE TRAZABILIDAD IOT DE HELADERAS  
+Deep Sleep Architecture – ESP32 + Node + MongoDB + Flutter
+
+Sistema completo de monitoreo y trazabilidad de temperatura y voltaje para heladeras comerciales o industriales, diseñado con enfoque en eficiencia energética utilizando Deep Sleep del ESP32.
+
+ARQUITECTURA GENERAL – DIAGRAMA LÓGICO
+
+Microcontrolador
+- ESP32 WROOM-32E
+- Rol: medición de sensores, filtrado de datos, envío, Deep Sleep (300s)
+
+Backend
+- Node.js + Express
+- Rol: API REST, umbrales, alertas, endpoints de consulta y configuración
+
+Base de Datos
+- MongoDB
+- Colecciones:
+  - measurements
+  - sensors
+
+Frontend
+- Flutter (Dart)
+- Rol: visualización en tiempo real, historial, gráficos con fl_chart
+
+COMPONENTES DE HARDWARE Y CALIBRACIÓN
+
+2.1 Deep Sleep (Maximización de Batería)
+- Ciclo:
+  - Despertar
+  - Medir sensores
+  - POST de datos
+  - Dormir 300s
+- Timer: esp_sleep_enable_timer_wakeup
+
+2.2 Monitoreo de Batería
+Sistema alimentado con 4 pilas AA: ~6.0V total
+
+Parámetros:
+- Pin ADC: GPIO 34
+- R1: 100kΩ
+- R2: 47kΩ
+- Factor divisor calibrado: 1.82
+
+Notas:
+- El factor 1.82 corrige la referencia de voltaje cruda del ADC
+- Ejemplo: lectura inicial: 10.32V → calibrado: 6.0V
+
+2.3 Sensores de Temperatura
+- Tipo: DS18B20 sumergibles
+- Conexión: One-Wire GPIO 4
+
+LÓGICA DEL FIRMWARE (ESP32)
+
+- IDs lógicas fijas para sensores (HELADERA-01, etc.)
+- Filtrado y promedio de 20 lecturas de voltaje
+- Payload JSON por POST al backend
+
+Ejemplo de payload:
+
+{
+  "id": "HELADERA-02",
+  "temp": -17.4,
+  "battery": 5.89,
+  "timestamp": "2025-11-10T18:22:10Z"
+}
+
+LÓGICA DEL BACKEND (Node.js / Express)
+
+4.1 Endpoints principales
+
+POST /api/sensors/config
+- guarda/actualiza nombre y umbral de un sensor
+
+GET /api/sensors/ids
+- devuelve lista fija de IDs del firmware
+
+GET /api/latest
+- lista sensores configurados y muestra "Sin datos" si no hay primeras mediciones
+
+4.2 Manejo horario UTC → Local
+Conversión aplicada en Flutter:
+DateTime.parse(value).toUtc().toLocal();
+
+LÓGICA DEL FRONTEND (Flutter)
+
+5.1 UX y estabilidad
+- Modelos con campos opcionales
+- Auto refresh cada 30s
+- Navigator.pushReplacement ante error de conexión
+
+5.2 Historial
+- Últimos 100 puntos
+- fl_chart con altura fija 250px
+- Eje X optimizado para tiempo
+
+RESUMEN BENEFICIOS CLAVE
+- Modular y escalable
+- Deep Sleep ultra eficiente
+- IDs lógicas fijas
+- Backend desacoplado
+- Frontend robusto
+- Lecturas calibradas reales
+
+MEJORAS FUTURAS
+- OTA
+- MQTT
+- Almacenamiento local
+- Alertas push
+- Gráficos comparativos
+
+LICENCIA
+MIT
+
+CONTACTO / AUTOR
+Proyecto real de monitoreo IoT para refrigeración.
