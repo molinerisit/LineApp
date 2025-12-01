@@ -19,7 +19,7 @@ char serverPortChar[6];
 #define VOLTAGE_ADC_PIN 34      // Pin ADC 34 para la lectura del Divisor de Voltaje
 
 // Coeficientes del Divisor de Voltaje (Para 100k y 47k)
-const float VOLTAGE_DIVIDER_FACTOR = 3.127; 
+const float VOLTAGE_DIVIDER_FACTOR = 1.82; 
 const float MAX_ADC_VOLTAGE = 3.3; // Voltaje máximo de entrada del ADC del ESP32
 
 // IDs Lógicas que Flutter usa para configurar (Máximo 5)

@@ -19,6 +19,12 @@ class Measurement {
 
   // Constructor de fábrica para crear una instancia desde un mapa JSON
   factory Measurement.fromJson(Map<String, dynamic> json) {
+    
+    // ⭐️ CORRECCIÓN ZONA HORARIA: Forzar a UTC y luego a Local ⭐️
+    final DateTime utcTimeCandidate = DateTime.parse(json['timestamp'] as String);
+    // Aseguramos que la base es UTC antes de aplicar el huso local
+    final DateTime localTime = utcTimeCandidate.toUtc().toLocal(); 
+
     return Measurement(
       // MongoDB usa '_id', Flutter lo usará como 'id'
       id: json['_id'] as String, 
@@ -26,8 +32,8 @@ class Measurement {
       // Los datos vienen como números de la DB, se leen como double en Dart
       temperatureC: json['temperatureC'].toDouble(),
       voltageV: json['voltageV'].toDouble(),
-      // Convierte el string de fecha ISO a un objeto DateTime
-      timestamp: DateTime.parse(json['timestamp'] as String), 
+      // ⭐️ Se usa la hora local corregida ⭐️
+      timestamp: localTime, 
     );
   }
 }

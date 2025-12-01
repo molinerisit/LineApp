@@ -1,8 +1,8 @@
-// lib/screens/module_create_screen.dart (VERSION FINAL CON DROPDOWN)
+// lib/screens/module_create_screen.dart
 
 import 'package:flutter/material.dart';
 import '../services/api_service.dart';
-import '../utils/constants.dart'; // Importa la lista PREDEFINED_HARDWARE_IDS
+// ⭐️ YA NO IMPORTAMOS constants.dart AQUÍ ⭐️
 
 class ModuleCreateScreen extends StatefulWidget {
   const ModuleCreateScreen({super.key});
@@ -15,12 +15,22 @@ class _ModuleCreateScreenState extends State<ModuleCreateScreen> {
   final _formKey = GlobalKey<FormState>();
   
   final _nameController = TextEditingController();
-  final _thresholdController = TextEditingController(text: '5.0'); 
-  final _voltageThresholdController = TextEditingController(text: '4.2'); 
+  final _thresholdController = TextEditingController(text: '5.0');
+  final _voltageThresholdController = TextEditingController(text: '4.2');
 
-  String? _selectedHardwareId; // Usado para el Dropdown
+  // ⭐️ NUEVO: Future para cargar la lista de IDs ⭐️
+  late Future<List<String>> _availableHardwareIdsFuture;
+
+  String? _selectedHardwareId; 
   String _selectedType = 'sensor';
   bool _isLoading = false;
+
+  @override
+  void initState() {
+    super.initState();
+    // ⭐️ INICIAMOS LA CARGA DE DATOS DESDE LA API ⭐️
+    _availableHardwareIdsFuture = ApiService.getAvailableHardwareIds();
+  }
 
   Future<void> _createModule() async {
     // Validar formulario y asegurar que se seleccionó un ID
@@ -42,12 +52,11 @@ class _ModuleCreateScreenState extends State<ModuleCreateScreen> {
 
     // LLAMADA A LA API PARA CONFIGURAR EL SENSOR
     final success = await ApiService.createModule(
-      _selectedHardwareId!, // ⭐️ Usamos el ID seleccionado del Dropdown
+      _selectedHardwareId!, 
       _nameController.text.trim(),
       _selectedType,
       alertThresholdC: alertThreshold, 
       voltageThresholdV: voltageThreshold,
-      // desiredState: null (ignorado por el backend)
     );
 
     if (!mounted) return;
@@ -79,25 +88,40 @@ class _ModuleCreateScreenState extends State<ModuleCreateScreen> {
           child: SingleChildScrollView(
             child: Column(
               children: [
-                // ⭐️ DROPDOWN PARA EL ID DE HARDWARE PREDEFINIDO ⭐️
-                DropdownButtonFormField<String>(
-                  value: _selectedHardwareId,
-                  items: PREDEFINED_HARDWARE_IDS.map((String id) {
-                    return DropdownMenuItem<String>(
-                      value: id,
-                      child: Text(id),
-                    );
-                  }).toList(),
-                  onChanged: (String? newValue) {
-                    setState(() {
-                      _selectedHardwareId = newValue;
-                    });
+                // ⭐️ DROPDOWN CARGADO POR FUTUREBUILDER ⭐️
+                FutureBuilder<List<String>>(
+                  future: _availableHardwareIdsFuture,
+                  builder: (context, snapshot) {
+                    if (snapshot.connectionState == ConnectionState.waiting) {
+                      return const Center(child: CircularProgressIndicator());
+                    } else if (snapshot.hasError) {
+                      return const Text('Error al cargar IDs. Verifique el servidor.');
+                    } else if (snapshot.hasData && snapshot.data!.isNotEmpty) {
+                      final availableIds = snapshot.data!;
+                      return DropdownButtonFormField<String>(
+                        value: _selectedHardwareId,
+                        items: availableIds.map((String id) {
+                          return DropdownMenuItem<String>(
+                            value: id,
+                            child: Text(id),
+                          );
+                        }).toList(),
+                        onChanged: (String? newValue) {
+                          setState(() {
+                            _selectedHardwareId = newValue;
+                          });
+                        },
+                        decoration: const InputDecoration(
+                          labelText: 'ID de Hardware (Puerto Lógico)',
+                          border: OutlineInputBorder(),
+                        ),
+                        validator: (value) => (value == null || value.isEmpty) ? 'Seleccione un puerto' : null,
+                      );
+                    } else {
+                       // Caso de que la lista esté vacía o el servidor no devolvió IDs
+                      return const Text('No se encontraron IDs de hardware disponibles.');
+                    }
                   },
-                  decoration: const InputDecoration(
-                    labelText: 'ID de Hardware (Puerto Lógico)', 
-                    border: OutlineInputBorder(),
-                  ),
-                  validator: (value) => (value == null || value.isEmpty) ? 'Seleccione un puerto' : null,
                 ),
                 
                 const SizedBox(height: 16),

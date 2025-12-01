@@ -89,6 +89,27 @@ class ApiService {
     }
   }
   
+  // ----------------------------------------------------
+  // 4. RECUPERACIÓN DE HARDWARE IDs DISPONIBLES
+  // Ruta: GET /api/sensors/ids
+  // ----------------------------------------------------
+  static Future<List<String>> getAvailableHardwareIds() async {
+    try {
+      final response = await http.get(Uri.parse('$BASE_URL/sensors/ids'));
+
+      if (response.statusCode == 200) {
+        List<dynamic> jsonList = jsonDecode(response.body);
+        // Retorna la lista de strings (IDs)
+        return jsonList.map((item) => item.toString()).toList();
+      } else {
+        if (kDebugMode) print('Error al obtener IDs: ${response.statusCode}');
+        return [];
+      }
+    } catch (e) {
+      if (kDebugMode) print('Excepción al obtener IDs: $e');
+      return [];
+    }
+  }
   // Nota: Las funciones login, signup, etc., de tu código AgriSense original
   // deben ser añadidas aquí si planeas implementarlas.
 }
